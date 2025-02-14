@@ -1,4 +1,4 @@
-const Redis = require("ioredis");
+const express = require("express");
 const puppeteer = require("puppeteer");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const dotenv = require("dotenv");
@@ -7,46 +7,8 @@ const path = require("path");
 
 dotenv.config();
 
-const subscriber = new Redis();
 const gemini_api_key = process.env.API_KEY;
 const googleAI = new GoogleGenerativeAI(gemini_api_key);
-
-subscriber.subscribe("pdf-scraping", (err, count) => {
-  if (err) {
-    console.error("Failed to subscribe:", err.message);
-    return;
-  }
-  console.log(`Subscribed to ${count} channels`);
-});
-
-subscriber.on("message", async (message) => {
-  const data = JSON.parse(message);
-
-  try {
-    const result = await scrapePdfFromSGA(data.protocol);
-
-    await Redis.set(`pdf-result:${data.job_id}`, JSON.stringify(result));
-
-    Redis.publish(
-      "pdf-complete",
-      JSON.stringify({
-        job_id: data.job_id,
-        status: "completed",
-        timestamp: Date.now(),
-      })
-    );
-  } catch (error) {
-    Redis.publish(
-      "pdf-complete",
-      JSON.stringify({
-        job_id: data.job_id,
-        status: "failed",
-        error: error.message,
-        timestamp: Date.now(),
-      })
-    );
-  }
-});
 
 const geminiConfig = {
   temperature: 0.9,
@@ -60,12 +22,13 @@ const geminiModel = googleAI.getGenerativeModel({
   geminiConfig,
 });
 
-const nProtocol = `17.120.535-2`;
+const app = express();
+const port = 3001;
 let browser = null;
 
 async function setupBrowser() {
   browser = await puppeteer.launch({
-    headless: false,
+    headless: "new",
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -95,7 +58,7 @@ async function setupBrowser() {
   return { page };
 }
 
-async function scrapePdfFromSGA() {
+async function scrapePdfFromSGA(numero_protocolo) {
   try {
     const { page } = await setupBrowser();
 
@@ -122,7 +85,7 @@ async function scrapePdfFromSGA() {
     console.log("Status:", response.status());
 
     await page.waitForSelector("#txtNumProtocolo-inputEl", { visible: true });
-    await page.type("#txtNumProtocolo-inputEl", nProtocol);
+    await page.type("#txtNumProtocolo-inputEl", numero_protocolo);
     await page.click("#botaoPesquisar_consultarProcessoLicenciamentoGrid");
 
     await page.waitForSelector(".x-grid-cell-gridcolumn-1035 a");
@@ -153,7 +116,10 @@ async function scrapePdfFromSGA() {
     });
 
     // Wait a moment for the download to complete
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise((resolve) => {
+      downloadStarted;
+      setTimeout(resolve, 2000);
+    });
 
     // Get the downloaded file and convert to base64
     const files = await fs.promises.readdir("./downloads");
@@ -221,7 +187,17 @@ async function analyzeGeminiWithGemini(base64Pdf) {
         {
           parts: [
             {
-              text: "Get the text by the end of the pages, that lives on the left side of the signature field. only return th written text correctly formatted, the text we want is not date, it is information about the document, when there is no signature field get the text inside the sector 4 - condicionamento, do not send any 'EM BRANCO' or 'EM BRANCO EM BRANCO' or 'EM BRANCO EM BRANCO EM BRANCO'.",
+              text: `**Extract Text from PDF Document**
+								1.  **Extract Text Near Signature Field:** If a signature field is present in the document, find the text located to the left of this field. The signature field is the designated area for signatures.  Exclude any dates from this extracted text.
+								2.  **Extract Text from 'Condicionamento' Sector (Conditional):** If there is no signature field in the document, extract the text from 'sector 4 - condicionamento'.  Assume 'sector 4 - condicionamento' refers to a clearly marked section within the document.
+								3.  **Formatting and Filtering:** For both extraction cases:
+    									*   Return the extracted text, preserving its original formatting (line breaks, spacing).
+    									*   Remove any leading or trailing whitespace.
+    									*   Do not output any of these phrases (or variations with extra whitespace): 'EM BRANCO', 'EM BRANCO EM BRANCO', 'EM BRANCO EM BRANCO EM BRANCO'.
+											*   The extracted text is not only a date, it is a a good ammount of information.
+											*   Do not extract any text that is only a date, only if the date is part of the large chunk of text.
+								4.  **Output:** Return the extracted text only and nothing else.
+											`,
             },
             {
               inline_data: {
@@ -242,6 +218,30 @@ async function analyzeGeminiWithGemini(base64Pdf) {
   }
 }
 
+app.use(express.json());
+
+app.post("/scrape", async (req, res) => {
+  try {
+    console.log(req.url);
+    console.log(req.body);
+    console.log(req.body.numero_protocolo);
+    const { numero_protocolo } = req.body;
+    const scrapedData = await scrapePdfFromSGA(numero_protocolo);
+    res.json({ success: true, data: scrapedData });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Server running at http://localhost:${port}`);
+});
+
+// Error handling
 process.on("uncaughtException", (error) => {
   console.error("Uncaught Exception:", error);
   setTimeout(() => process.exit(1), 1000);
