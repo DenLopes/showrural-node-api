@@ -118,7 +118,7 @@ async function scrapePdfFromSGA(numero_protocolo) {
     // Wait a moment for the download to complete
     await new Promise((resolve) => {
       downloadStarted;
-      setTimeout(resolve, 2000);
+      setTimeout(resolve, 1000);
     });
 
     // Get the downloaded file and convert to base64
@@ -132,11 +132,14 @@ async function scrapePdfFromSGA(numero_protocolo) {
     // Clean up downloaded file
     await fs.promises.unlink(pdfPath);
 
+    await browser.close();
+
     return {
       success: true,
       message: "Scraping completed",
       data: {
-        pdfBase64,
+        numero_protocolo: numero_protocolo,
+        pdf: pdfBase64,
         condicionamento: condicionamento,
       },
     };
