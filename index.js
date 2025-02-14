@@ -199,6 +199,7 @@ async function analyzeGeminiWithGemini(base64Pdf) {
     									*   Do not output any of these phrases (or variations with extra whitespace): 'EM BRANCO', 'EM BRANCO EM BRANCO', 'EM BRANCO EM BRANCO EM BRANCO'.
 											*   The extracted text is not only a date, it is a a good ammount of information.
 											*   Do not extract any text that is only a date, only if the date is part of the large chunk of text.
+                4.  **Remember that when the document is in topics like 'condicionamento' the text is not always in the same place, so you need to find the text in the document, the part of the text selected in these cases should be the 4 - As condicionantes.**
 								4.  **Output:** Return the extracted text only and nothing else.
 											`,
             },
